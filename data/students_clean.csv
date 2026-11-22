@@ -1,0 +1,21 @@
+student_id,name,age,major,gpa,credits_completed,enrollment_year
+S1001,Aisha Khan,21,Computer Science,3.4,64,2023
+S1002,Ben Carter,22,Data Science,3.1,78,2022
+S1003,Chen Wei,20,Mathematics,3.8,45,2024
+S1004,Diego Ramos,23,Information Systems,2.9,92,2022
+S1005,Emma Larsen,21,Computer Science,3.6,60,2023
+S1006,Farah Ali,24,Data Science,3.2,98,2022
+S1007,George Mills,19,Mathematics,3.0,30,2025
+S1008,Hana Sato,22,Information Systems,3.7,74,2023
+S1009,Ivan Petrov,20,Computer Science,2.8,42,2024
+S1010,Julia Costa,23,Data Science,3.5,88,2022
+S1011,Kofi Mensah,21,Mathematics,3.3,58,2023
+S1012,Lena Fischer,25,Information Systems,3.0,104,2022
+S1013,Mohit Rao,20,Computer Science,3.9,40,2024
+S1014,Nora Hughes,22,Data Science,2.7,70,2023
+S1015,Omar Haddad,19,Mathematics,3.4,32,2025
+S1016,Priya Nair,24,Information Systems,3.1,96,2022
+S1017,Quinn Brooks,21,Computer Science,3.6,62,2023
+S1018,Rosa Medina,23,Data Science,3.2,84,2022
+S1019,Sam Okafor,20,Mathematics,2.9,44,2024
+S1020,Tara Singh,22,Information Systems,3.5,72,2023
