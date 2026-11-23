@@ -1,0 +1,5 @@
+{
+  "data": "data/does_not_exist.csv",
+  "question": "Is this dataset clean?",
+  "error": "File not found: data/does_not_exist.csv"
+}
