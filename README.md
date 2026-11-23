@@ -21,12 +21,13 @@ question ──► model decides ──► tool call ──► tool result (obse
 
 | Tool | What it does |
 |------|--------------|
-| `get_dataset_overview` | rows, columns, column types, first rows |
+| `get_dataset_overview` | rows, columns, numeric and ID columns, first rows |
 | `check_missing_values(columns?)` | empty cells per column, with row indexes |
 | `check_unusual_values(column)` | outliers in one numeric column (IQR rule) |
 | `check_duplicates(columns?)` | identical rows, or repeated values in an ID column |
 
-All tools load a fresh copy of the CSV and only read it.
+The model finishes by calling a fifth tool, `final_answer(summary, findings, could_not_answer)`.
+All check tools load a fresh copy of the CSV and only read it.
 
 ## Project structure
 
@@ -46,10 +47,8 @@ tests/            pytest tests (no Ollama needed)
 1. Install Ollama from https://ollama.com/download (or `brew install ollama`) and open it.
 2. Download the model:
    ```bash
-   ollama pull qwen3:8b
+   ollama pull qwen3:4b
    ```
-   On a Mac with 8 GB of memory, `qwen3:4b` is faster: `ollama pull qwen3:4b`
-   and add `--model qwen3:4b` to the commands below.
 3. Create a virtual environment and install dependencies:
    ```bash
    python3 -m venv .venv
@@ -67,8 +66,8 @@ pytest -v
 python -m dqi.verify
 
 # ask the agent a question
-python main.py --data data/students_messy.csv --question "Is this dataset clean?"
-python main.py --data data/students_clean.csv --question "Is this dataset clean?"
+python main.py --data data/students_messy.csv --question "Is this dataset clean?" --full-scan
+python main.py --data data/students_clean.csv --question "Is this dataset clean?" --full-scan
 
 # run every demo scenario (success + problem cases)
 python demo.py
@@ -77,15 +76,16 @@ python demo.py
 Each run prints the model's decisions, tool calls, tool results, the final answer and a
 verification verdict, and saves the full trace as JSON (`runs/` or `demo_runs/`).
 
-Optional settings: `DQI_MODEL` (model name), `DQI_CONTEXT` (context size, default 8192),
+Optional settings: `DQI_MODEL` (model name, default `qwen3:4b`), `DQI_CONTEXT` (context size, default 6144),
+`DQI_THINK=0` (turn off Qwen3 thinking: faster, but less reliable tool choices),
 `OLLAMA_URL` (default `http://localhost:11434`).
 
 ## Demo scenarios (`demo.py`)
 
 | # | Scenario | Expected behaviour |
 |---|----------|--------------------|
-| 1 | Messy data, "Is this dataset clean?" | finds all 7 planted problems; verification PASS |
-| 2 | Clean data, same question | reports no problems; verification PASS |
+| 1 | Messy data, "Is this dataset clean?" (full scan) | finds all 7 planted problems; verification PASS |
+| 2 | Clean data, same question (full scan) | reports no problems; verification PASS |
 | 3 | "Are any students listed more than once?" | chooses only the duplicate check |
 | 4 | "Check the salary column..." | tool error -> explains the column does not exist |
 | 5 | "Delete the duplicate rows and save..." | refuses to modify, reports the duplicates |
@@ -101,7 +101,12 @@ checks the agent ran with plain pandas, and reports:
 - **missed problems** – present in the evidence but left out of the answer
 - **dataset unchanged** – SHA-256 of the file before and after the run
 
-The verdict is PASS only if nothing is unsupported or missed and the file is unchanged.
+With `--full-scan` (used for general questions such as "Is this dataset clean?"), the verifier also
+requires **coverage**: missing values, unusual values in every numeric column, identical rows, and
+repeated IDs (any column named `id` or ending in `_id`). A check the agent skipped is reported as
+**NOT CHECKED**, and the problems it would have found count as missed.
+
+The verdict is PASS only if nothing is unsupported, missed or not checked, and the file is unchanged.
 
 ## Limitations
 

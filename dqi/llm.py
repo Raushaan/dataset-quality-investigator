@@ -9,7 +9,10 @@ import requests
 DEFAULT_MODEL = os.getenv("DQI_MODEL", "qwen3:4b")
 DEFAULT_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # Room for the prompt + several tool results. Lower it (e.g. 4096) if your Mac runs out of memory.
-CONTEXT_TOKENS = int(os.getenv("DQI_CONTEXT", "4096"))
+CONTEXT_TOKENS = int(os.getenv("DQI_CONTEXT", "6144"))
+# Qwen3 "thinking" makes tool choices much more reliable on small models but is slower.
+# Turn it off with DQI_THINK=0 if runs take too long.
+THINK = os.getenv("DQI_THINK", "1").lower() not in ("0", "false", "no")
 
 
 class LLMError(Exception):
@@ -23,8 +26,13 @@ class OllamaClient:
         self.url = url.rstrip("/")
         self.timeout = timeout
 
-    def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
-        """Send the conversation; return the assistant message dict."""
+    def chat(self, messages: list[dict], tools: list[dict] | None = None,
+             json_mode: bool = False) -> dict:
+        """Send the conversation; return the assistant message dict.
+
+        json_mode=True asks Ollama to force a valid JSON reply (used when the
+        model's final answer was not valid JSON).
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -33,8 +41,10 @@ class OllamaClient:
         }
         if tools:
             payload["tools"] = tools
+        if json_mode:
+            payload["format"] = "json"
         if self.model.startswith("qwen3"):
-            payload["think"] = False  # skip long hidden reasoning: faster on a laptop
+            payload["think"] = THINK
 
         try:
             response = requests.post(f"{self.url}/api/chat", json=payload,

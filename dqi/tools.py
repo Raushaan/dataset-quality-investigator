@@ -61,8 +61,8 @@ def get_dataset_overview(df: pd.DataFrame) -> dict:
         "rows": int(len(df)),
         "columns": list(df.columns),
         "numeric_columns": _numeric_columns(df),
-        "dtypes": {c: str(t) for c, t in df.dtypes.items()},
-        "first_rows": json.loads(df.head(3).to_json(orient="records")),
+        "id_columns": [c for c in df.columns if c.lower() == "id" or c.lower().endswith("_id")],
+        "first_rows": json.loads(df.head(2).to_json(orient="records")),
     }
 
 
@@ -176,7 +176,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_dataset_overview",
-            "description": "Get the row count, column names, column types and first rows. "
+            "description": "Get the row count, column names, numeric and ID columns, and first rows. "
             "Use this first when you do not yet know the columns.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -251,6 +251,9 @@ def validate_args(name: str, args) -> dict:
         raise ToolError(f"Arguments for '{name}' must be an object.")
 
     allowed = TOOL_ARGS[name]
+    if name == "check_unusual_values" and "columns" in args:
+        raise ToolError("check_unusual_values takes ONE column: pass {\"column\": \"<name>\"} "
+                        "and call the tool once for each numeric column.")
     clean = {}
     for key, value in args.items():
         if key not in allowed:

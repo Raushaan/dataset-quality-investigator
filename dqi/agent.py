@@ -27,34 +27,81 @@ Tools:
 - check_duplicates: identical rows (no arguments), or repeated IDs (columns=["<id column>"]).
 
 Rules:
-1. Choose only the checks the question needs. A general question such as "is this dataset clean?" \
-needs missing values, unusual values in every numeric column, and duplicates (both identical rows \
-and repeated IDs if there is an ID column).
-2. Read every tool result before choosing the next step. If a tool returns an error, adapt \
+1. Decide which checks the question needs.
+   - A GENERAL question ("Is this dataset clean?", "Check for any problems") needs the FULL set:
+     check_missing_values once; check_unusual_values once for EACH numeric column listed by
+     get_dataset_overview; check_duplicates with no arguments; and check_duplicates with the
+     ID column (for example ["student_id"]) if there is one. Do not give the final answer
+     until every one of these has been run.
+   - A SPECIFIC question needs only the checks it asks about.
+2. Never run the same tool with the same arguments twice. Earlier results stay above in the
+   conversation; reuse them.
+3. Read every tool result before choosing the next step. If a tool returns an error, adapt \
 (for example use a column that exists) or explain the problem to the user.
-3. Report only what tool results show. Never invent rows, values or columns.
-4. If the user asks you to modify, fix, delete or save data, do not try: say you only report \
+4. Report only what tool results show. Never invent rows, values or columns. Every problem a \
+tool found must appear in your findings.
+5. If the user asks you to modify, fix, delete or save data, do not try: say you only report \
 problems, and report what you found if it is useful.
-5. Identify rows by row_index exactly as the tools return it. For duplicates, list every row_index \
+6. Identify rows by row_index exactly as the tools return it. For duplicates, list every row_index \
 in each duplicate group (the original and its copies).
+7. Use only column names that get_dataset_overview returned. Never guess column names.
 
-When you are finished, reply with ONLY this JSON object and no other text:
-{"summary": "<2-4 plain sentences for the user>",
- "findings": [{"check": "missing_values" | "unusual_values" | "duplicates",
-               "column": "<column name; for identical-row duplicates use null>",
-               "rows": [<row_index>, ...],
-               "detail": "<short explanation with the values>"}],
- "could_not_answer": "<what you could not do and why, or null>"}
-Use "findings": [] when the checks you ran found no problems."""
+When you are finished, call the final_answer tool with:
+  summary: 2-4 plain sentences for the user
+  findings: a list of {"check": "missing_values" | "unusual_values" | "duplicates",
+                       "column": "<column name; null for identical-row duplicates>",
+                       "rows": [<row_index>, ...],
+                       "detail": "<short explanation with the values>"}
+  could_not_answer: what you could not do and why, or null
+Use an empty findings list when the checks you ran found no problems."""
 
 NUDGE_NO_TOOLS = (
     "You have not inspected the data yet. Call a tool, or, if the request cannot be "
     "handled by your tools, reply with the final JSON and explain in could_not_answer."
 )
 NUDGE_BAD_JSON = (
-    "Your last reply was not the required JSON object. Reply again with ONLY the JSON "
-    "object (summary, findings, could_not_answer) and no other text."
+    "Your last reply was not a final answer. Call the final_answer tool now with summary, "
+    "findings and could_not_answer (or reply with ONLY that JSON object)."
 )
+NUDGE_JSON_ONLY = (
+    "Reply with ONLY a JSON object with the keys summary, findings and could_not_answer, "
+    "based on the tool results above."
+)
+
+FINAL_TOOL = "final_answer"
+FINAL_ANSWER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": FINAL_TOOL,
+        "description": "Give your final report to the user. Call this once, after the checks "
+                       "the question needs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "2-4 plain sentences."},
+                "findings": {
+                    "type": "array",
+                    "description": "One item per problem found by a tool.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "check": {"type": "string",
+                                      "enum": ["missing_values", "unusual_values", "duplicates"]},
+                            "column": {"type": ["string", "null"]},
+                            "rows": {"type": "array", "items": {"type": "integer"}},
+                            "detail": {"type": "string"},
+                        },
+                        "required": ["check", "rows"],
+                    },
+                },
+                "could_not_answer": {"type": ["string", "null"],
+                                     "description": "What you could not do, or null."},
+            },
+            "required": ["summary", "findings"],
+        },
+    },
+}
+AGENT_TOOLS = TOOL_SCHEMAS + [FINAL_ANSWER_SCHEMA]
 
 
 @dataclass
@@ -83,7 +130,27 @@ def parse_final_answer(text: str) -> dict | None:
         data = json.loads(text[start:end + 1])
     except json.JSONDecodeError:
         return None
-    return data if isinstance(data, dict) and "summary" in data else None
+    return answer_from_args(data)
+
+
+def answer_from_args(args) -> dict | None:
+    """Build an answer dict from final_answer arguments (or a parsed JSON reply)."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(args, dict) or not ({"summary", "findings"} & set(args)):
+        return None
+    findings = args.get("findings") or []
+    if isinstance(findings, str):  # some models send the list as a JSON string
+        try:
+            findings = json.loads(findings)
+        except json.JSONDecodeError:
+            findings = []
+    return {"summary": str(args.get("summary") or ""),
+            "findings": findings if isinstance(findings, list) else [],
+            "could_not_answer": args.get("could_not_answer")}
 
 
 def clean_findings(answer: dict, warnings: list) -> dict:
@@ -104,7 +171,7 @@ def clean_findings(answer: dict, warnings: list) -> dict:
     return answer
 
 
-def run_agent(question: str, csv_path: str, llm, max_steps: int = 12,
+def run_agent(question: str, csv_path: str, llm, max_steps: int = 15,
               log=print) -> AgentResult:
     result = AgentResult(question=question, csv_path=csv_path)
 
@@ -117,50 +184,87 @@ def run_agent(question: str, csv_path: str, llm, max_steps: int = 12,
         {"role": "user",
          "content": f"Dataset file: {Path(csv_path).name}\nQuestion: {question}"},
     ]
-    nudged_for_tools = nudged_for_json = False
+    nudged_for_tools = False
+    format_nudges = 0           # times we asked for a proper final answer (max 2)
+    force_json = False          # last resort: Ollama strict JSON mode, no tools
+    seen_calls = {}             # (tool, args) -> step it was first run
 
     for step in range(1, max_steps + 1):
-        message = llm.chat(messages, tools=TOOL_SCHEMAS)
+        if force_json:
+            force_json = False
+            message = llm.chat(messages, json_mode=True)
+        else:
+            message = llm.chat(messages, tools=AGENT_TOOLS)
         calls = message.get("tool_calls") or []
         content = message.get("content") or ""
         messages.append({"role": "assistant", "content": content,
                          **({"tool_calls": calls} if calls else {})})
 
-        # ---- the model chose one or more tools: run them, feed results back
-        if calls:
-            for call in calls:
-                fn = call.get("function", {})
-                name, args = fn.get("name", "?"), fn.get("arguments") or {}
-                event("decision", f"[step {step}] model chose tool: {name}({json.dumps(args)})",
-                      step=step, tool=name, args=args)
-                observation = run_tool(name, args, csv_path)
-                result.tool_calls.append(
-                    {"step": step, "name": name, "args": args if isinstance(args, dict) else {},
-                     "result": observation})
-                event("observation", f"[step {step}] result: {_short(observation)}",
-                      step=step, tool=name, result=observation)
+        # ---- run the tools the model chose; set aside any final answer
+        final_args, ran_checks = None, False
+        for call in calls:
+            fn = call.get("function", {})
+            name, args = fn.get("name", "?"), fn.get("arguments") or {}
+            stuffed = (name != FINAL_TOOL and isinstance(args, dict)
+                       and {"summary", "findings"} & set(args))
+            if name == FINAL_TOOL or stuffed:
+                if stuffed:
+                    event("note", f"[step {step}] model put its final answer inside {name}(...) "
+                                  "-> treated as final_answer", step=step)
+                final_args = args
                 messages.append({"role": "tool", "tool_name": name,
-                                 "content": json.dumps(observation)})
+                                 "content": '{"ok": true, "result": "final answer received"}'})
+                continue
+
+            ran_checks = True
+            event("decision", f"[step {step}] model chose tool: {name}({json.dumps(args)})",
+                  step=step, tool=name, args=args)
+            key = f"{name} {json.dumps(args, sort_keys=True)}"
+            if key in seen_calls:
+                observation = {"ok": False, "error": (
+                    f"You already ran {name} with these arguments at step {seen_calls[key]}; "
+                    "its result is above. Run a different check or call final_answer.")}
+            else:
+                seen_calls[key] = step
+                observation = run_tool(name, args, csv_path)
+            result.tool_calls.append(
+                {"step": step, "name": name, "args": args if isinstance(args, dict) else {},
+                 "result": observation})
+            event("observation", f"[step {step}] result: {_short(observation)}",
+                  step=step, tool=name, result=observation)
+            messages.append({"role": "tool", "tool_name": name,
+                             "content": json.dumps(observation, separators=(",", ":"))})
+
+        if ran_checks:
+            if final_args is not None:  # answered before reading these new results
+                event("nudge", f"[step {step}] final answer sent together with new checks "
+                               "-> asked to read the results first", step=step)
+                messages.append({"role": "user", "content":
+                                 "Read the new tool results above, then call final_answer again."})
             continue
 
-        # ---- no tool call: the model wants to finish
+        # ---- the model wants to finish (final_answer call or plain text)
         if not result.tool_calls and not nudged_for_tools:
             nudged_for_tools = True
             event("nudge", f"[step {step}] model tried to answer without evidence -> asked to use a tool")
             messages.append({"role": "user", "content": NUDGE_NO_TOOLS})
             continue
 
-        answer = parse_final_answer(content)
-        if answer is None and not nudged_for_json:
-            nudged_for_json = True
-            event("nudge", f"[step {step}] final answer was not valid JSON -> asked again")
-            messages.append({"role": "user", "content": NUDGE_BAD_JSON})
+        answer = answer_from_args(final_args) if final_args is not None \
+            else parse_final_answer(content)
+        if answer is None and format_nudges < 2:
+            format_nudges += 1
+            force_json = format_nudges == 2
+            mode = " (strict JSON mode)" if force_json else ""
+            event("nudge", f"[step {step}] no usable final answer -> asked again{mode}")
+            messages.append({"role": "user",
+                             "content": NUDGE_JSON_ONLY if force_json else NUDGE_BAD_JSON})
             continue
 
-        result.raw_answer = content
+        result.raw_answer = content or json.dumps(final_args)
         if answer is None:
             result.stopped_reason = "bad_final_answer"
-            event("stop", f"[step {step}] stopped: model never produced valid JSON")
+            event("stop", f"[step {step}] stopped: model never produced a usable final answer")
         else:
             result.answer = clean_findings(answer, result.warnings)
             result.stopped_reason = "answered"

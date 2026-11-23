@@ -64,14 +64,20 @@ def print_verification(report: dict) -> None:
     for t in report["unsupported_claims"]:
         print(f"  UNSUPPORTED claim (not in evidence): {t}")
     for t in report["missed_problems"]:
-        print(f"  MISSED (tool found it, answer left it out): {t}")
+        print(f"  MISSED (in the evidence, left out of the answer): {t}")
+    for check, column in report.get("not_checked", []):
+        target = "identical rows" if column == "*" and check == "duplicates" else (
+            "all columns" if column == "*" else f"column '{column}'")
+        print(f"  NOT CHECKED (needed for a full scan): {check} on {target}")
     print(f"  verdict: {'PASS' if report['passed'] else 'FAIL'}")
 
 
 def investigate(data: str, question: str, model: str = DEFAULT_MODEL,
-                max_steps: int = 12, save_dir: str = "runs") -> dict:
+                max_steps: int = 15, save_dir: str = "runs",
+                full_scan: bool = False) -> dict:
     """Run one investigation end to end and save the trace. Returns the record."""
-    print(f"{LINE}\nDataset:  {data}\nQuestion: {question}\nModel:    {model}\n{LINE}")
+    print(f"{LINE}\nDataset:  {data}\nQuestion: {question}\nModel:    {model}"
+          f"{'   (full scan: every check required)' if full_scan else ''}\n{LINE}")
 
     problem = check_input_file(data)
     if problem:
@@ -86,10 +92,10 @@ def investigate(data: str, question: str, model: str = DEFAULT_MODEL,
             record = {"data": data, "question": question, "error": str(exc)}
         else:
             print_answer(result)
-            report = verify(data, result.answer, result.tool_calls, before)
+            report = verify(data, result.answer, result.tool_calls, before, full_scan=full_scan)
             print_verification(report)
             record = {
-                "data": data, "question": question, "model": model,
+                "data": data, "question": question, "model": model, "full_scan": full_scan,
                 "stopped_reason": result.stopped_reason, "answer": result.answer,
                 "tool_calls": result.tool_calls, "trace": result.trace,
                 "verification": report, "warnings": result.warnings,
@@ -107,9 +113,12 @@ def main() -> int:
     parser.add_argument("--data", required=True, help="path to a CSV file")
     parser.add_argument("--question", default="Is this dataset clean? Check for any problems.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model name")
-    parser.add_argument("--max-steps", type=int, default=12)
+    parser.add_argument("--max-steps", type=int, default=15)
+    parser.add_argument("--full-scan", action="store_true",
+                        help="general question: verification also requires every check to be run")
     args = parser.parse_args()
-    record = investigate(args.data, args.question, args.model, args.max_steps)
+    record = investigate(args.data, args.question, args.model, args.max_steps,
+                         full_scan=args.full_scan)
     return 1 if "error" in record else 0
 
 

@@ -53,6 +53,8 @@ def test_invalid_tool_and_arguments_rejected():
     assert not run_tool("delete_rows", {}, MESSY)["ok"]
     assert not run_tool("check_unusual_values", {}, MESSY)["ok"]          # missing column
     assert not run_tool("check_missing_values", {"rows": [1]}, MESSY)["ok"]  # unknown argument
+    out = run_tool("check_unusual_values", {"columns": ["age", "gpa"]}, MESSY)
+    assert not out["ok"] and "once for each numeric column" in out["error"]
 
 
 def test_tools_never_modify_the_file():
