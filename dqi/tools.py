@@ -61,7 +61,7 @@ def get_dataset_overview(df: pd.DataFrame) -> dict:
         "rows": int(len(df)),
         "columns": list(df.columns),
         "numeric_columns": _numeric_columns(df),
-        "id_columns": [c for c in df.columns if c.lower() == "id" or c.lower().endswith("_id")],
+        "id_columns": _id_columns(df),
         "first_rows": json.loads(df.head(2).to_json(orient="records")),
     }
 
@@ -134,23 +134,40 @@ def check_unusual_values(df: pd.DataFrame, column: str) -> dict:
     }
 
 
+def _id_columns(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if c.lower() == "id" or c.lower().endswith("_id")]
+
+
+def _groups(df: pd.DataFrame, key_cols: list[str]) -> list[list[int]]:
+    mask = df.duplicated(subset=key_cols, keep=False)
+    return [_row_list(g.index)
+            for _, g in df[mask].groupby(key_cols, dropna=False, sort=False)]
+
+
 def check_duplicates(df: pd.DataFrame, columns: list[str] | None = None) -> dict:
-    """Find repeated rows. With `columns` (e.g. an ID), compare only those columns."""
+    """Find duplicate records.
+
+    No arguments: identical rows AND repeated values in every ID column.
+    With `columns`: repeated values in just those columns.
+    Exact copies are counted once as identical rows, so an ID shared only by
+    two identical rows is not reported a second time as a repeated ID.
+    """
     if columns:
         _require_columns(df, columns)
-    key_cols = columns or list(df.columns)
+    distinct = df[~df.duplicated(keep="first")]   # exact copies removed, original index kept
 
-    mask = df.duplicated(subset=key_cols, keep=False)
-    groups = [
-        _row_list(group.index)
-        for _, group in df[mask].groupby(key_cols, dropna=False, sort=False)
-    ]
+    if columns:
+        groups = _groups(distinct, columns)
+        return {"check": "duplicates", "compared_columns": columns,
+                "duplicate_group_count": len(groups), "duplicate_groups": groups[:MAX_ITEMS]}
+
+    identical = _groups(df, list(df.columns))
     return {
         "check": "duplicates",
-        "compared_columns": "all columns" if not columns else key_cols,
-        "duplicate_group_count": len(groups),
-        "extra_copies": int(df.duplicated(subset=key_cols, keep="first").sum()),
-        "duplicate_groups": groups[:MAX_ITEMS],
+        "identical_rows": {"duplicate_groups": identical[:MAX_ITEMS],
+                           "extra_copies": int(df.duplicated(keep="first").sum())},
+        "repeated_ids": {c: _groups(distinct, [c])[:MAX_ITEMS] for c in _id_columns(df)},
+        "how_to_report": "identical rows: column null; repeated IDs: column = the ID column name",
     }
 
 
@@ -218,8 +235,9 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "check_duplicates",
-            "description": "Find duplicate records. Omit 'columns' to find fully identical "
-            "rows; pass an ID column (e.g. ['student_id']) to find repeated IDs.",
+            "description": "Find duplicate records. With no arguments it checks BOTH identical "
+            "rows and repeated IDs in every ID column. Pass 'columns' only to check other "
+            "columns that should be unique.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -13,7 +13,9 @@
 | 6 | duplicates (whole row) | all columns | 1 and 20 | 3 and 22 | row 1 (S1002) copied to the end |
 | 7 | duplicates (ID) | student_id | 8 and 21 | 10 and 23 | ID S1009 reused for a different student |
 
-Because row 20 is an exact copy of row 1, a duplicate check on `student_id` reports two groups: [1, 20] and [8, 21].
+`check_duplicates()` with no arguments reports both kinds: identical rows [1, 20] and the repeated ID [8, 21].
+Exact copies are counted once (as identical rows), so rows 1 and 20 are not reported again as a repeated ID.
+A complete, correct answer therefore contains 9 (check, column, row_index) entries.
 
 `students_clean.csv` has none of these problems: every check returns nothing.
 Check this yourself without the agent: `python -m dqi.verify`

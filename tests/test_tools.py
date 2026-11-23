@@ -28,15 +28,18 @@ def test_unusual_values_found_in_messy():
 
 
 def test_duplicates_found_in_messy():
-    assert result("check_duplicates", {})["duplicate_groups"] == [[1, 20]]
-    assert result("check_duplicates", {"columns": ["student_id"]})["duplicate_groups"] == [[1, 20], [8, 21]]
+    r = result("check_duplicates", {})                # no arguments: identical rows + IDs
+    assert r["identical_rows"]["duplicate_groups"] == [[1, 20]]
+    assert r["repeated_ids"] == {"student_id": [[8, 21]]}
+    assert result("check_duplicates", {"columns": ["student_id"]})["duplicate_groups"] == [[8, 21]]
 
 
 def test_clean_dataset_has_no_problems():
     assert result("check_missing_values", {}, CLEAN)["total_missing_cells"] == 0
     for col in NUMERIC:
         assert result("check_unusual_values", {"column": col}, CLEAN)["unusual_count"] == 0
-    assert result("check_duplicates", {"columns": ["student_id"]}, CLEAN)["duplicate_groups"] == []
+    r = result("check_duplicates", {}, CLEAN)
+    assert r["identical_rows"]["duplicate_groups"] == [] and r["repeated_ids"] == {"student_id": []}
 
 
 def test_unknown_column_returns_error_not_crash():

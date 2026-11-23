@@ -52,10 +52,13 @@ def direct_unusual(df: pd.DataFrame, column: str) -> set:
 
 
 def direct_duplicates(df: pd.DataFrame, columns=None) -> set:
-    subset = list(columns) if columns else None
-    repeated = df.duplicated(subset=subset, keep=False)
-    key = _dup_key(columns)
-    return {("duplicates", key, int(i)) for i in df.index[repeated]}
+    """No columns: identical rows. Columns: repeated values among distinct rows."""
+    if not columns:
+        repeated = df.duplicated(keep=False)
+        return {("duplicates", ALL_ROWS, int(i)) for i in df.index[repeated]}
+    distinct = df.drop_duplicates(keep="first")
+    repeated = distinct.duplicated(subset=list(columns), keep=False)
+    return {("duplicates", _dup_key(columns), int(i)) for i in distinct.index[repeated]}
 
 
 # ------------------------------------------------ coverage for full scans
@@ -90,7 +93,11 @@ def performed_checks(df: pd.DataFrame, tool_calls: list[dict]) -> set:
         elif call["name"] == "check_unusual_values":
             done.add(("unusual_values", args.get("column")))
         elif call["name"] == "check_duplicates":
-            done.add(("duplicates", _dup_key(args.get("columns"))))
+            if args.get("columns"):
+                done.add(("duplicates", _dup_key(args["columns"])))
+            else:
+                done.add(("duplicates", ALL_ROWS))
+                done |= {("duplicates", c) for c in id_columns(df)}
     return done
 
 
@@ -116,7 +123,12 @@ def ground_truth_for_calls(csv_path: str, tool_calls: list[dict]) -> set:
         elif call["name"] == "check_unusual_values":
             truth |= direct_unusual(df, args["column"])
         elif call["name"] == "check_duplicates":
-            truth |= direct_duplicates(df, args.get("columns"))
+            if args.get("columns"):
+                truth |= direct_duplicates(df, args["columns"])
+            else:  # no arguments = identical rows + every ID column
+                truth |= direct_duplicates(df)
+                for col in id_columns(df):
+                    truth |= direct_duplicates(df, [col])
     return truth
 
 

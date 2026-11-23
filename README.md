@@ -24,7 +24,7 @@ question ──► model decides ──► tool call ──► tool result (obse
 | `get_dataset_overview` | rows, columns, numeric and ID columns, first rows |
 | `check_missing_values(columns?)` | empty cells per column, with row indexes |
 | `check_unusual_values(column)` | outliers in one numeric column (IQR rule) |
-| `check_duplicates(columns?)` | identical rows, or repeated values in an ID column |
+| `check_duplicates(columns?)` | no arguments: identical rows **and** repeated IDs; or repeated values in given columns |
 
 The model finishes by calling a fifth tool, `final_answer(summary, findings, could_not_answer)`.
 All check tools load a fresh copy of the CSV and only read it.
